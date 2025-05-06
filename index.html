@@ -51,106 +51,109 @@
   
   <textarea id="output" placeholder="Merged KML will appear here ..."></textarea>
   
-  <script>
-    // Utility function to read a file as text and return a promise
-    function readFileAsText(file) {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => resolve(e.target.result);
-        reader.onerror = (err) => reject(err);
-        reader.readAsText(file);
-      });
-    }
+ <script>
+  // Utility function to read a file as text and return a promise
+  function readFileAsText(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = (err) => reject(err);
+      reader.readAsText(file);
+    });
+  }
+  
+  // Merge KML files by extracting all element nodes (e.g., Placemark, Style, StyleMap) from the Document element
+  async function mergeKMLFiles(files) {
+    const parser = new DOMParser();
+    let mergedNodes = [];
     
-    // Merge KML files by extracting their Placemark nodes from the Document element
-    async function mergeKMLFiles(files) {
-      const parser = new DOMParser();
-      let placemarks = [];
-      
-      // Process each file
-      for (const file of files) {
-        try {
-          const text = await readFileAsText(file);
-          const xmlDoc = parser.parseFromString(text, "application/xml");
-          
-          // Check for XML parsing errors
-          const parsererror = xmlDoc.querySelector("parsererror");
-          if (parsererror) {
-            console.error(`Error parsing ${file.name}:`, parsererror.textContent);
-            continue;
-          }
-          
-          // Look for the <Document> element in the KML
-          let docEl = xmlDoc.getElementsByTagName("Document")[0];
-          if (!docEl) {
-            // If no Document element, maybe the Placemarks are under the root <kml>
-            docEl = xmlDoc.documentElement;
-          }
-          
-          // Add all Placemark elements to our merged list
-          const filePlacemarks = docEl.getElementsByTagName("Placemark");
-          for (let i = 0; i < filePlacemarks.length; i++) {
-            placemarks.push(filePlacemarks[i]);
-          }
-        } catch (error) {
-          console.error(`Error processing file ${file.name}:`, error);
-        }
-      }
-      
-      // Create a new merged KML document
-      const mergedDoc = document.implementation.createDocument(null, "kml", null);
-      // Optionally add KML namespace if needed
-      mergedDoc.documentElement.setAttribute("xmlns", "http://www.opengis.net/kml/2.2");
-      
-      // Create a Document node
-      const mergedDocument = mergedDoc.createElement("Document");
-      mergedDoc.documentElement.appendChild(mergedDocument);
-      
-      // Import and append each Placemark
-      placemarks.forEach(placemark => {
-        const importedPlacemark = mergedDoc.importNode(placemark, true);
-        mergedDocument.appendChild(importedPlacemark);
-      });
-      
-      // Serialize the XML document to a string
-      const serializer = new XMLSerializer();
-      const mergedString = serializer.serializeToString(mergedDoc);
-      return mergedString;
-    }
-    
-    document.getElementById("mergeBtn").addEventListener("click", async () => {
-      const files = document.getElementById("uploader").files;
-      if (!files.length) {
-        alert("Please select one or more KML files.");
-        return;
-      }
-      
+    // Process each file
+    for (const file of files) {
       try {
-        const mergedKML = await mergeKMLFiles(files);
-        document.getElementById("output").value = mergedKML;
-        if (mergedKML) {
-          document.getElementById("downloadBtn").style.display = "inline-block";
+        const text = await readFileAsText(file);
+        const xmlDoc = parser.parseFromString(text, "application/xml");
+        
+        // Check for XML parsing errors
+        const parsererror = xmlDoc.querySelector("parsererror");
+        if (parsererror) {
+          console.error(`Error parsing ${file.name}:`, parsererror.textContent);
+          continue;
         }
-      } catch (err) {
-        console.error("Error merging files:", err);
+        
+        // Look for the <Document> element in the KML.
+        // If none, fall back to the document root.
+        let docEl = xmlDoc.getElementsByTagName("Document")[0];
+        if (!docEl) {
+          docEl = xmlDoc.documentElement;
+        }
+        
+        // Iterate over all children of the Document element
+        // This will include Placemark, Style, StyleMap, Folder, etc.
+        for (let i = 0; i < docEl.childNodes.length; i++) {
+          const node = docEl.childNodes[i];
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            mergedNodes.push(node);
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing file ${file.name}:`, error);
       }
+    }
+    
+    // Create a new merged KML document
+    const mergedDoc = document.implementation.createDocument(null, "kml", null);
+    mergedDoc.documentElement.setAttribute("xmlns", "http://www.opengis.net/kml/2.2");
+    
+    // Create a single Document node to hold all merged nodes
+    const mergedDocument = mergedDoc.createElement("Document");
+    mergedDoc.documentElement.appendChild(mergedDocument);
+    
+    // Import and append each collected node into the new Document node.
+    mergedNodes.forEach(node => {
+      const importedNode = mergedDoc.importNode(node, true);
+      mergedDocument.appendChild(importedNode);
     });
     
-    // Create a download link for the merged KML file
-    document.getElementById("downloadBtn").addEventListener("click", function() {
-      const mergedContent = document.getElementById("output").value;
-      const blob = new Blob([mergedContent], { type: "application/vnd.google-earth.kml+xml" });
-      const url = URL.createObjectURL(blob);
-      
-      // Trigger a download by creating an anchor element
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "merged.kml";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    });
-  </script>
+    // Serialize the merged KML document into a string
+    const serializer = new XMLSerializer();
+    const mergedString = serializer.serializeToString(mergedDoc);
+    return mergedString;
+  }
+  
+  // Event listener for merging files
+  document.getElementById("mergeBtn").addEventListener("click", async () => {
+    const files = document.getElementById("uploader").files;
+    if (!files.length) {
+      alert("Please select one or more KML files.");
+      return;
+    }
+    
+    try {
+      const mergedKML = await mergeKMLFiles(files);
+      document.getElementById("output").value = mergedKML;
+      if (mergedKML) {
+        document.getElementById("downloadBtn").style.display = "inline-block";
+      }
+    } catch (err) {
+      console.error("Error merging files:", err);
+    }
+  });
+  
+  // Create a download link for the merged KML file
+  document.getElementById("downloadBtn").addEventListener("click", function() {
+    const mergedContent = document.getElementById("output").value;
+    const blob = new Blob([mergedContent], { type: "application/vnd.google-earth.kml+xml" });
+    const url = URL.createObjectURL(blob);
+    
+    // Trigger a download
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "merged.kml";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+</script>
 </body>
 </html>
